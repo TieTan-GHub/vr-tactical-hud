@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>BD Infantry - VR Tactical HUD</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{--g:#00ff88;--r:#ff3344;--a:#ffaa00;--b:#00ccff;--dark:rgba(0,8,4,0.88);}
+html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'Share Tech Mono',monospace;color:var(--g);-webkit-tap-highlight-color:transparent;}
+
+/* ══════════════════════════════════
+   SPLASH SCREEN
+   Single button — tapping it fires
+   Android native Camera + GPS popups
+══════════════════════════════════ */
+#splash{
+  position:fixed;inset:0;z-index:9999;
+  background:#000d05;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:20px;
+}
+.sp-flag{font-size:40px;}
+.sp-title{
+  font-family:'Orbitron',sans-serif;font-size:22px;font-weight:900;
+  letter-spacing:4px;color:var(--g);
+  text-shadow:0 0 30px var(--g),0 0 60px rgba(0,255,136,0.3);
+}
+.sp-sub{
+  font-size:10px;letter-spacing:3px;color:rgba(0,255,136,0.4);
+}
+/* The one button that does everything */
+#startBtn{
+  margin-top:10px;
+  font-family:'Orbitron',sans-serif;font-weight:900;
+  font-size:17px;letter-spacing:5px;
+  padding:20px 50px;
+  border:2px solid var(--g);
+  background:rgba(0,255,136,0.08);
+  color:var(--g);cursor:pointer;
+  position:relative;overflow:hidden;
+  animation:btnGlow 2s ease-in-out infinite;
+  -webkit-tap-highlight-color:transparent;
+  /* Makes button feel instant on Android */
+  touch-action:manipulation;
+}
+#startBtn::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,transparent 40%,rgba(0,255,136,0.1) 50%,transparent 60%);
+  transform:translateX(-100%);
+  animation:shine 3s ease-in-out infinite;
+}
+@keyframes btnGlow{
+  0%,100%{box-shadow:0 0 20px rgba(0,255,136,0.3),inset 0 0 20px rgba(0,255,136,0.05);}
+  50%{box-shadow:0 0 50px rgba(0,255,136,0.6),0 0 80px rgba(0,255,136,0.2),inset 0 0 30px rgba(0,255,136,0.1);}
+}
+@keyframes shine{0%{transform:translateX(-100%)}60%,100%{transform:translateX(200%)}}
+#startBtn:active{background:rgba(0,255,136,0.25);transform:scale(0.98);}
+
+.sp-note{
+  font-size:9px;color:rgba(255,170,0,0.5);
+  letter-spacing:1px;line-height:2;text-align:center;
+  border:1px solid rgba(255,170,0,0.15);
+  padding:8px 18px;max-width:280px;
+}
+
+/* Loading state */
+#splash.loading #startBtn{
+  animation:none;
+  color:rgba(0,255,136,0.4);
+  border-color:rgba(0,255,136,0.2);
+  pointer-events:none;
+}
+#loadMsg{
+  font-size:11px;letter-spacing:2px;
+  color:var(--a);display:none;
+  animation:blink 0.8s infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+
+/* ══════════════════════════════════
+   VR WRAPPER
+══════════════════════════════════ */
+#vr{display:none;width:100%;height:100%;flex-direction:row;position:relative;}
+.eye{flex:1;position:relative;overflow:hidden;}
+#vrdiv{
+  position:absolute;left:50%;top:0;bottom:0;width:3px;z-index:100;
+  transform:translateX(-50%);pointer-events:none;
+  background:linear-gradient(to bottom,transparent,rgba(0,255,136,0.6) 30%,rgba(0,255,136,0.6) 70%,transparent);
+}
+
+/* Camera feed */
+.cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;filter:saturate(0.85) contrast(1.1);}
+.eye.R .cam{transform:scaleX(-1);}
+
+/* Vignette lens effect */
+.lens{
+  position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 52%,rgba(0,0,0,0.6) 78%,rgba(0,0,0,0.95) 100%);
+}
+/* CRT scanlines */
+.scan{
+  position:absolute;inset:0;z-index:3;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,transparent 0,transparent 3px,rgba(0,0,0,0.06) 3px,rgba(0,0,0,0.06) 4px);
+}
+
+/* HUD frame corners */
+.hc{position:absolute;width:44px;height:44px;z-index:20;pointer-events:none;}
+.hc::before,.hc::after{content:'';position:absolute;background:var(--g);box-shadow:0 0 8px var(--g),0 0 16px rgba(0,255,136,0.25);}
+.hc::before{width:100%;height:2px;top:0;left:0;}
+.hc::after{width:2px;height:100%;top:0;left:0;}
+.hc.tl{top:10px;left:10px;}
+.hc.tr{top:10px;right:10px;transform:scaleX(-1);}
+.hc.bl{bottom:10px;left:10px;transform:scaleY(-1);}
+.hc.br{bottom:10px;right:10px;transform:scale(-1);}
+
+/* Reticle */
+.ret{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:25;pointer-events:none;width:60px;height:60px;}
+.rring{position:absolute;inset:0;border:1.5px solid rgba(255,50,50,0.65);border-radius:50%;box-shadow:0 0 14px rgba(255,50,50,0.25),inset 0 0 14px rgba(255,50,50,0.06);animation:rp 2.2s ease-in-out infinite;}
+.rinn{position:absolute;inset:20px;border:1px solid rgba(255,50,50,0.9);border-radius:50%;}
+.rh,.rv{position:absolute;background:rgba(255,50,50,0.65);}
+.rh{width:100%;height:1px;top:50%;}
+.rv{height:100%;width:1px;left:50%;}
+@keyframes rp{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.55;transform:scale(1.07)}}
+
+/* ── MINIMAP 75px circle ── */
+.mm{position:absolute;bottom:14px;left:14px;z-index:40;width:75px;height:75px;}
+.mmring{
+  position:absolute;inset:0;border-radius:50%;border:2px solid var(--g);overflow:hidden;
+  box-shadow:0 0 0 1px #000,0 0 14px rgba(0,255,136,0.5),0 0 28px rgba(0,255,136,0.15),inset 0 0 14px rgba(0,0,0,0.6);
+}
+.mmmap{width:100%;height:100%;border-radius:50%;overflow:hidden;}
+.gmapEl{width:100%;height:100%;}
+/* inner range rings */
+.mmrings{position:absolute;inset:0;z-index:48;pointer-events:none;border-radius:50%;overflow:hidden;}
+.mmrings::before{content:'';position:absolute;inset:25%;border-radius:50%;border:1px solid rgba(0,255,136,0.18);}
+.mmrings::after{content:'';position:absolute;inset:10%;border-radius:50%;border:1px solid rgba(0,255,136,0.1);}
+/* soldier dot */
+.mmdot{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:50;pointer-events:none;}
+.mmarr{position:absolute;bottom:100%;left:50%;margin-left:-1px;width:1px;height:7px;background:linear-gradient(to top,var(--r),transparent);transform-origin:bottom center;}
+.mmdot2{width:6px;height:6px;background:var(--r);border-radius:50%;border:1px solid #fff;box-shadow:0 0 6px var(--r),0 0 12px rgba(255,50,50,0.4);animation:sp 1s ease-in-out infinite;}
+@keyframes sp{0%,100%{box-shadow:0 0 6px var(--r),0 0 12px rgba(255,50,50,0.4)}50%{box-shadow:0 0 10px var(--r),0 0 20px rgba(255,50,50,0.7)}}
+/* North label */
+.mmN{position:absolute;top:-12px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--r);letter-spacing:1px;text-shadow:0 0 6px var(--r);z-index:52;pointer-events:none;}
+.mmLbl{position:absolute;bottom:-13px;left:50%;transform:translateX(-50%);font-size:7px;letter-spacing:2px;color:rgba(0,255,136,0.4);white-space:nowrap;}
+/* zoom buttons — left eye only */
+.mmzoom{position:absolute;right:-22px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:3px;}
+.zb{width:16px;height:16px;background:var(--dark);border:1px solid rgba(0,255,136,0.4);color:var(--g);font-size:11px;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;transition:all 0.15s;line-height:1;touch-action:manipulation;}
+.zb:active{background:rgba(0,255,136,0.2);box-shadow:0 0 8px var(--g);}
+
+/* Data panels */
+.pan{position:absolute;z-index:30;background:var(--dark);border:1px solid rgba(0,255,136,0.2);padding:5px 9px;backdrop-filter:blur(4px);}
+.uniP{top:14px;left:14px;border-left:3px solid var(--g);}
+.cs{font-family:'Orbitron',sans-serif;font-size:12px;font-weight:700;color:var(--g);letter-spacing:3px;text-shadow:0 0 10px var(--g);}
+.csb{font-size:8px;color:rgba(0,255,136,0.4);letter-spacing:2px;margin-top:2px;}
+.stP{top:14px;right:14px;border-right:3px solid var(--a);text-align:right;}
+.sr{display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-bottom:2px;}
+.sl{font-size:8px;color:rgba(255,170,0,0.5);letter-spacing:1px;}
+.sv{font-size:11px;color:var(--a);}
+.coP{bottom:14px;right:14px;border-right:3px solid var(--b);text-align:right;}
+.cr{display:flex;justify-content:flex-end;gap:9px;margin-bottom:2px;}
+.cl{font-size:8px;color:rgba(0,200,255,0.45);letter-spacing:2px;}
+.cv{font-size:10px;color:var(--b);}
+.mg{font-size:8px;color:var(--a);margin-top:3px;padding-top:3px;border-top:1px solid rgba(0,200,255,0.12);}
+
+/* Top center mode tag */
+.topC{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:30;text-align:center;}
+.modeT{font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:4px;color:var(--a);border:1px solid rgba(255,170,0,0.3);padding:2px 10px;text-shadow:0 0 10px var(--a);background:var(--dark);}
+.utc{font-size:9px;color:rgba(0,255,136,0.5);margin-top:3px;}
+
+/* Compass strip */
+.cstrip{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.hdg{font-family:'Orbitron',sans-serif;font-size:19px;font-weight:700;color:var(--g);text-shadow:0 0 15px var(--g);line-height:1;}
+.card{font-size:9px;color:var(--a);letter-spacing:3px;}
+.tape{width:150px;height:18px;background:var(--dark);border:1px solid rgba(0,255,136,0.18);position:relative;overflow:hidden;}
+.tapei{position:absolute;top:0;height:100%;display:flex;align-items:center;font-size:8px;white-space:nowrap;transition:transform 0.12s;}
+
+/* Elevation bar */
+.elvb{position:absolute;right:0;top:50%;transform:translateY(-50%);z-index:30;display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding-right:11px;}
+.elvv{font-family:'Orbitron',sans-serif;font-size:15px;color:var(--a);text-shadow:0 0 10px var(--a);}
+.elvl{font-size:8px;color:rgba(255,170,0,0.4);letter-spacing:2px;}
+.elvg{width:4px;height:65px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.25);position:relative;overflow:hidden;}
+.elvf{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,var(--a),rgba(255,170,0,0.25));transition:height 1s;}
+
+/* Target flash */
+.tgt{position:absolute;z-index:35;pointer-events:none;display:none;}
+.tgti{border:2px solid var(--r);box-shadow:0 0 12px var(--r),inset 0 0 10px rgba(255,50,50,0.05);padding:4px 8px;animation:tb 0.5s infinite;}
+.tgtl{font-size:9px;color:var(--r);letter-spacing:2px;text-shadow:0 0 8px var(--r);}
+@keyframes tb{0%,100%{opacity:1}50%{opacity:0.35}}
+
+/* VR toggle */
+#vrBtn{position:fixed;top:8px;right:8px;z-index:500;display:none;font-family:'Orbitron',sans-serif;font-size:8px;font-weight:700;letter-spacing:2px;padding:5px 10px;border:1px solid rgba(0,255,136,0.35);background:var(--dark);color:var(--g);cursor:pointer;touch-action:manipulation;}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════
+     SPLASH SCREEN
+     One tap = Android shows its own
+     native Camera + Location popups
+═══════════════════════════════ -->
+<div id="splash">
+  <div class="sp-flag">&#127463;&#127465;</div>
+  <div class="sp-title">VR TACTICAL HUD</div>
+  <div class="sp-sub">BANGLADESH INFANTRY REGIMENT</div>
+
+  <!--
+    This single button triggers:
+    1. navigator.mediaDevices.getUserMedia  → Android shows "Allow Camera?" popup
+    2. navigator.geolocation.watchPosition  → Android shows "Allow Location?" popup
+    Both popups are native Android system dialogs — no custom UI needed
+  -->
+  <button id="startBtn" onclick="boot()">&#9654; START</button>
+
+  <div id="loadMsg">REQUESTING PERMISSIONS...</div>
+
+  <div class="sp-note">
+    &#128247; Camera &amp; &#128205; Location access will be<br>
+    requested by your Android system automatically.
+  </div>
+</div>
+
+<!-- VR toggle -->
+<button id="vrBtn" onclick="toggleVR()">VR: ON</button>
+
+<!-- ═══════════════════════════════
+     VR WRAPPER — left + right eye
+═══════════════════════════════ -->
+<div id="vr">
+
+  <!-- LEFT EYE -->
+  <div class="eye L">
+    <video class="cam" id="camL" autoplay playsinline muted></video>
+    <div class="lens"></div><div class="scan"></div>
+    <div class="hc tl"></div><div class="hc tr"></div><div class="hc bl"></div><div class="hc br"></div>
+    <div class="ret"><div class="rring"></div><div class="rinn"></div><div class="rh"></div><div class="rv"></div></div>
+    <div class="pan uniP"><div class="cs">DELTA 1-C</div><div class="csb">BD INFANTRY REG</div></div>
+    <div class="topC"><div class="modeT">&#9655; COMBAT MODE</div><div class="utc" id="utcL">--:--:-- UTC</div></div>
+    <div class="pan stP">
+      <div class="sr"><span class="sl">GPS</span><span class="sv" id="gL">ACQ</span></div>
+      <div class="sr"><span class="sl">ALT</span><span class="sv" id="aL">--M</span></div>
+      <div class="sr"><span class="sl">SPD</span><span class="sv" id="sL">0KM/H</span></div>
+    </div>
+    <!-- MINIMAP LEFT -->
+    <div class="mm">
+      <div class="mmN" id="nL">N</div>
+      <div class="mmring">
+        <div class="mmmap"><div id="gmL" class="gmapEl"></div></div>
+        <div class="mmrings"></div>
+        <div class="mmdot"><div class="mmarr" id="arL"></div><div class="mmdot2"></div></div>
+      </div>
+      <div class="mmLbl">SAT</div>
+      <div class="mmzoom"><div class="zb" onclick="zIn()">+</div><div class="zb" onclick="zOut()">-</div></div>
+    </div>
+    <div class="pan coP">
+      <div class="cr"><span class="cl">LAT</span><span class="cv" id="laL">--.-----</span></div>
+      <div class="cr"><span class="cl">LON</span><span class="cv" id="loL">--.-----</span></div>
+      <div class="mg">MGRS: <span id="mgL">---</span></div>
+    </div>
+    <div class="cstrip">
+      <div class="hdg" id="hL">---</div>
+      <div class="card" id="cL">N</div>
+      <div class="tape"><div class="tapei" id="tL"></div></div>
+    </div>
+    <div class="elvb">
+      <div class="elvl">ALT</div>
+      <div class="elvg"><div class="elvf" id="efL" style="height:25%"></div></div>
+      <div class="elvv" id="evL">--M</div>
+      <div class="elvl">ASL</div>
+    </div>
+    <div class="tgt" id="tgL" style="top:27%;right:15%;"><div class="tgti"><div class="tgtl">TARGET ACQUIRED</div></div></div>
+  </div>
+
+  <!-- DIVIDER -->
+  <div id="vrdiv"></div>
+
+  <!-- RIGHT EYE -->
+  <div class="eye R">
+    <video class="cam" id="camR" autoplay playsinline muted></video>
+    <div class="lens"></div><div class="scan"></div>
+    <div class="hc tl"></div><div class="hc tr"></div><div class="hc bl"></div><div class="hc br"></div>
+    <div class="ret"><div class="rring"></div><div class="rinn"></div><div class="rh"></div><div class="rv"></div></div>
+    <div class="pan uniP"><div class="cs">DELTA 1-C</div><div class="csb">BD INFANTRY REG</div></div>
+    <div class="topC"><div class="modeT">&#9655; COMBAT MODE</div><div class="utc" id="utcR">--:--:-- UTC</div></div>
+    <div class="pan stP">
+      <div class="sr"><span class="sl">GPS</span><span class="sv" id="gR">ACQ</span></div>
+      <div class="sr"><span class="sl">ALT</span><span class="sv" id="aR">--M</span></div>
+      <div class="sr"><span class="sl">SPD</span><span class="sv" id="sR">0KM/H</span></div>
+    </div>
+    <!-- MINIMAP RIGHT — same 75px, same position -->
+    <div class="mm">
+      <div class="mmN" id="nR">N</div>
+      <div class="mmring">
+        <div class="mmmap"><div id="gmR" class="gmapEl"></div></div>
+        <div class="mmrings"></div>
+        <div class="mmdot"><div class="mmarr" id="arR"></div><div class="mmdot2"></div></div>
+      </div>
+      <div class="mmLbl">SAT</div>
+    </div>
+    <div class="pan coP">
+      <div class="cr"><span class="cl">LAT</span><span class="cv" id="laR">--.-----</span></div>
+      <div class="cr"><span class="cl">LON</span><span class="cv" id="loR">--.-----</span></div>
+      <div class="mg">MGRS: <span id="mgR">---</span></div>
+    </div>
+    <div class="cstrip">
+      <div class="hdg" id="hR">---</div>
+      <div class="card" id="cR">N</div>
+      <div class="tape"><div class="tapei" id="tR"></div></div>
+    </div>
+    <div class="elvb">
+      <div class="elvl">ALT</div>
+      <div class="elvg"><div class="elvf" id="efR" style="height:25%"></div></div>
+      <div class="elvv" id="evR">--M</div>
+      <div class="elvl">ASL</div>
+    </div>
+    <div class="tgt" id="tgR" style="top:27%;right:15%;"><div class="tgti"><div class="tgtl">TARGET ACQUIRED</div></div></div>
+  </div>
+
+</div><!-- end #vr -->
+
+<script>
+var mL=null,mR=null,mkL=null,mkR=null;
+var zoom=17,hdg=0,lat=23.8103,lon=90.4125,alt=8,spd=0;
+var stream=null,vrOn=true,cmpOK=false,mapsOK=false,mapsPend=false;
+
+// ═══════════════════════════════════════════════════════
+//  boot() — called by the single START button tap
+//
+//  On Android Chrome, calling getUserMedia() and
+//  getCurrentPosition() inside a click handler causes
+//  the OS to show its OWN native permission dialogs:
+//   • "Allow [site] to use your camera?"
+//   • "Allow [site] to access your location?"
+//  These are real Android system popups — not custom UI.
+// ═══════════════════════════════════════════════════════
+async function boot() {
+  var btn = document.getElementById('startBtn');
+  var msg = document.getElementById('loadMsg');
+  var sp  = document.getElementById('splash');
+
+  btn.textContent = 'INITIALISING...';
+  btn.style.pointerEvents = 'none';
+  msg.style.display = 'block';
+  sp.classList.add('loading');
+
+  // ── CAMERA ──
+  // Android will show: "Allow [site] to use your camera?" — YES/NO
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+  } catch(e) {
+    // User denied or device has no camera — run in demo/no-cam mode
+    stream = null;
+  }
+
+  // ── LOCATION ──
+  // Android will show: "Allow [site] to access your location?" — YES/NO
+  // We use watchPosition so it keeps updating as soldier moves
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      function(p){ lat=p.coords.latitude; lon=p.coords.longitude; alt=p.coords.altitude||8; },
+      function(){},
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+    );
+  }
+
+  // ── COMPASS ──
+  // Android: no popup needed, events fire automatically
+  // iOS 13+: need requestPermission — handled below
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
+  }
+  window.addEventListener('deviceorientationabsolute', onOrient, true);
+  window.addEventListener('deviceorientation', onOrient, true);
+
+  // ── LAUNCH HUD ──
+  launchHUD();
+}
+
+function launchHUD() {
+  document.getElementById('splash').style.display = 'none';
+  document.getElementById('vr').style.display     = 'flex';
+  document.getElementById('vrBtn').style.display  = 'block';
+
+  if (stream) {
+    document.getElementById('camL').srcObject = stream;
+    document.getElementById('camR').srcObject = stream;
+  }
+
+  startGPSWatch();
+  startCmpDemo();
+  startClock();
+  buildTapes();
+  if (mapsOK) { doInitMaps(); } else { mapsPend = true; }
+
+  setTimeout(function(){
+    document.getElementById('tgL').style.display='block';
+    document.getElementById('tgR').style.display='block';
+    setTimeout(function(){
+      document.getElementById('tgL').style.display='none';
+      document.getElementById('tgR').style.display='none';
+    },4000);
+  },3000);
+}
+
+// ── Google Maps API callback ──
+function initMap() {
+  mapsOK = true;
+  if (mapsPend) doInitMaps();
+}
+function doInitMaps() {
+  var c={lat:lat,lng:lon};
+  var cfg={center:c,zoom:zoom,mapTypeId:'satellite',disableDefaultUI:true,gestureHandling:'none',keyboardShortcuts:false,tilt:0};
+  mL=new google.maps.Map(document.getElementById('gmL'),cfg);
+  mR=new google.maps.Map(document.getElementById('gmR'),{center:c,zoom:zoom,mapTypeId:'satellite',disableDefaultUI:true,gestureHandling:'none',keyboardShortcuts:false,tilt:0});
+  var ico={path:google.maps.SymbolPath.CIRCLE,scale:0};
+  mkL=new google.maps.Marker({position:c,map:mL,icon:ico});
+  mkR=new google.maps.Marker({position:c,map:mR,icon:ico});
+}
+
+// ── GPS continuous watch ──
+function startGPSWatch() {
+  if (!navigator.geolocation) { demoMove(); return; }
+  navigator.geolocation.watchPosition(
+    function(p){
+      lat=p.coords.latitude; lon=p.coords.longitude;
+      alt=p.coords.altitude||alt;
+      spd=p.coords.speed?(p.coords.speed*3.6).toFixed(1):0;
+      tick(); moveMaps();
+    },
+    demoMove,
+    {enableHighAccuracy:true,maximumAge:1500}
+  );
+}
+function demoMove(){
+  var a=0;
+  setInterval(function(){
+    a+=0.35;
+    lat=23.8103+Math.sin(a*Math.PI/180)*0.0009;
+    lon=90.4125+Math.cos(a*Math.PI/180)*0.0009;
+    alt=8+Math.sin(a*0.04)*4; spd=4.8;
+    tick(); moveMaps();
+  },500);
+}
+function moveMaps(){
+  var ll={lat:lat,lng:lon};
+  if(mL){mL.setCenter(ll);mkL.setPosition(ll);}
+  if(mR){mR.setCenter(ll);mkR.setPosition(ll);}
+}
+
+// ── Update all HUD values ──
+function tick(){
+  var m=toMGRS(lat,lon);
+  var p=Math.min(Math.max(alt/50*100,4),95)+'%';
+  set('laL',lat.toFixed(5)); set('loL',lon.toFixed(5)); set('mgL',m);
+  set('gL','LOCKED'); set('aL',Math.round(alt)+'M'); set('sL',spd+'KM/H');
+  set('evL',Math.round(alt)+'M'); document.getElementById('efL').style.height=p;
+  set('laR',lat.toFixed(5)); set('loR',lon.toFixed(5)); set('mgR',m);
+  set('gR','LOCKED'); set('aR',Math.round(alt)+'M'); set('sR',spd+'KM/H');
+  set('evR',Math.round(alt)+'M'); document.getElementById('efR').style.height=p;
+}
+function set(id,v){document.getElementById(id).textContent=v;}
+
+// ── Compass ──
+function onOrient(e){
+  if(e.alpha==null)return;
+  cmpOK=true;
+  applyHdg((360-e.alpha+360)%360);
+}
+function startCmpDemo(){
+  var d=0;
+  setInterval(function(){ if(!cmpOK){d=(d+0.5)%360;applyHdg(d);} },50);
+}
+var CARDS=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+function applyHdg(h){
+  hdg=h;
+  var d=Math.round(h),c=CARDS[Math.round(h/22.5)%16];
+  set('hL',d+'deg'); set('cL',c); set('hR',d+'deg'); set('cR',c);
+  updTape('tL',h); updTape('tR',h);
+  var rot='translateX(-50%) rotate('+(-h)+'deg)';
+  document.getElementById('nL').style.transform=rot;
+  document.getElementById('nR').style.transform=rot;
+  document.getElementById('arL').style.transform='rotate('+h+'deg)';
+  document.getElementById('arR').style.transform='rotate('+h+'deg)';
+  if(mL)mL.setHeading(h);
+  if(mR)mR.setHeading(h);
+}
+
+// ── Compass tape ──
+var TM=['N','','','','NE','','','','E','','','','SE','','','','S','','','','SW','','','','W','','','','NW','','','','N'];
+function buildTapes(){
+  ['tL','tR'].forEach(function(id){
+    document.getElementById(id).innerHTML=TM.map(function(m){
+      return '<span style="display:inline-block;width:12px;text-align:center;color:'+(m?'#ff3344':'rgba(0,255,136,0.28)')+'">'+( m||'|')+'</span>';
+    }).join('');
+  });
+}
+function updTape(id,h){
+  document.getElementById(id).style.transform='translateX('+( -(h/360)*12*32+62)+'px)';
+}
+
+// ── UTC Clock ──
+function startClock(){
+  setInterval(function(){
+    var n=new Date();
+    var t=n.getUTCHours().toString().padStart(2,'0')+':'+n.getUTCMinutes().toString().padStart(2,'0')+':'+n.getUTCSeconds().toString().padStart(2,'0')+' UTC';
+    set('utcL',t); set('utcR',t);
+  },1000);
+}
+
+// ── Map zoom ──
+function zIn() {if(zoom<20){zoom++;if(mL)mL.setZoom(zoom);if(mR)mR.setZoom(zoom);}}
+function zOut(){if(zoom>13){zoom--;if(mL)mL.setZoom(zoom);if(mR)mR.setZoom(zoom);}}
+
+// ── VR toggle ──
+function toggleVR(){
+  vrOn=!vrOn;
+  document.getElementById('vrBtn').textContent=vrOn?'VR: ON':'VR: OFF';
+  document.getElementById('vrdiv').style.display=vrOn?'block':'none';
+  document.querySelector('.eye.R').style.display=vrOn?'block':'none';
+}
+
+// ── MGRS approx ──
+function toMGRS(la,lo){
+  var z=Math.floor((lo+180)/6)+1;
+  var b='CDEFGHJKLMNPQRSTUVWX'[Math.floor((la+80)/8)]||'N';
+  var e=Math.round(((lo%6+6)%6)/6*100000);
+  var n=Math.round((la%8+8)%8/8*100000);
+  return z+b+' PQ '+String(e).padStart(5,'0')+' '+String(n).padStart(5,'0');
+}
+</script>
+
+<!--
+  REPLACE YOUR_API_KEY with your Google Maps key
+  Free key: console.cloud.google.com
+  Enable: Maps JavaScript API
+-->
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap"></script>
+
+</body>
+</html>
