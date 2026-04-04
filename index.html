@@ -94,9 +94,52 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
   border-left:2px solid var(--g);
   padding:4px 8px;
   min-width:90px;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
 }
+.voipBox:active{background:rgba(0,255,136,0.08);}
 .voipBox .vbOp{font-size:7px;color:rgba(0,255,136,0.5);letter-spacing:2px;}
 .voipBox .vbMb{font-size:9px;color:var(--a);letter-spacing:1px;margin-top:2px;font-family:'Orbitron',sans-serif;}
+
+/* MEMBER LIST POPUP — slides up from voipBox, same width */
+.memberList{
+  position:absolute;
+  bottom:175px;left:8px;
+  z-index:42;
+  display:none;
+  background:rgba(0,8,4,0.94);
+  border:1px solid rgba(0,255,136,0.3);
+  border-left:2px solid var(--g);
+  width:140px;
+  backdrop-filter:blur(4px);
+}
+.memberList .mlHead{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:4px 7px;
+  border-bottom:1px solid rgba(0,255,136,0.2);
+  font-size:7px;letter-spacing:2px;color:rgba(0,255,136,0.5);
+}
+.memberList .mlBack{
+  font-size:9px;color:var(--g);background:none;border:none;
+  cursor:pointer;padding:0 2px;touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+}
+.memberList .mlScroll{
+  max-height:60px; /* shows ~3 rows */
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+.memberList .mlScroll::-webkit-scrollbar{width:3px;}
+.memberList .mlScroll::-webkit-scrollbar-thumb{background:rgba(0,255,136,0.3);}
+.memberList .mlItem{
+  padding:4px 7px;
+  font-size:9px;color:var(--g);letter-spacing:1px;
+  border-bottom:1px solid rgba(0,255,136,0.08);
+  font-family:'Orbitron',sans-serif;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.memberList .mlItem.me{color:var(--a);}
+.memberList .mlItem.creator::after{content:' ★';color:var(--a);font-size:7px;}
 
 /* MUTE button — per-eye, bottom-right, above lat/lon box */
 .muteBx{
@@ -119,6 +162,29 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
   background:rgba(255,50,50,0.1);
   color:var(--r);
 }
+
+/* DISMISS / LOGOUT button — below gap adjuster, top-left */
+.netCtrlRow{
+  display:none; /* shown after joining network */
+}
+.netCtrlBtn{
+  width:100%;font-family:'Orbitron',sans-serif;font-size:7px;font-weight:700;
+  letter-spacing:1px;padding:4px 6px;
+  cursor:pointer;touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+  border-radius:2px;text-align:center;
+  margin-top:3px;
+}
+.netCtrlBtn.dismiss{
+  border:1px solid rgba(255,50,50,0.6);
+  background:rgba(255,50,50,0.1);color:var(--r);
+}
+.netCtrlBtn.dismiss:active{background:rgba(255,50,50,0.25);}
+.netCtrlBtn.logout{
+  border:1px solid rgba(255,170,0,0.5);
+  background:rgba(255,170,0,0.08);color:var(--a);
+}
+.netCtrlBtn.logout:active{background:rgba(255,170,0,0.2);}
 
 /* Active speaker name over clock */
 .speakerBox{
@@ -391,17 +457,21 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
     <div class="ret"><div class="rring"></div><div class="rinn"></div><div class="rh"></div><div class="rv"></div></div>
     <!-- SCREEN ADJUSTERS — top left -->
     <div class="wAdj">
-      <!-- Row 1: HUD width -->
+      <!-- Row 1: HUD scale -->
       <div class="adjRow">
         <div class="wBtn" onclick="wAdj(-1)">&#9664;</div>
         <div class="wVal" id="wValL">100%</div>
         <div class="wBtn" onclick="wAdj(1)">&#9654;</div>
       </div>
-      <!-- Row 2: Gap between two screens -->
+      <!-- Row 2: Screen gap -->
       <div class="adjRow">
         <div class="wBtn amber" onclick="gAdj(-1)">&#9664;</div>
         <div class="wVal amber" id="gValL">0px</div>
         <div class="wBtn amber" onclick="gAdj(1)">&#9654;</div>
+      </div>
+      <!-- Row 3: Dismiss/Logout — shown after joining network -->
+      <div class="netCtrlRow" id="netCtrlL">
+        <button class="netCtrlBtn dismiss" id="netCtrlBtnL" onclick="netCtrlAction()">DISMISS NTWK</button>
       </div>
     </div>
     <!-- UTC CLOCK — top center, no Combat Mode box -->
@@ -450,10 +520,18 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
       <div class="elvv" id="evL">--M</div>
       <div class="elvl">ASL</div>
     </div>
-    <!-- VOIP INFO BOX — separate, bottom-left -->
-    <div class="voipBox" id="voipBoxL">
+    <!-- VOIP INFO BOX — clickable to show member list -->
+    <div class="voipBox" id="voipBoxL" onclick="toggleMemberList('L')">
       <div class="vbOp" id="vbOpL">OP: ---</div>
-      <div class="vbMb" id="vbMbL">1/50</div>
+      <div class="vbMb" id="vbMbL">1/100</div>
+    </div>
+    <!-- MEMBER LIST POPUP — left eye -->
+    <div class="memberList" id="memberListL">
+      <div class="mlHead">
+        <span>MEMBERS</span>
+        <button class="mlBack" onclick="toggleMemberList('L')">&#10005;</button>
+      </div>
+      <div class="mlScroll" id="mlScrollL"></div>
     </div>
     <!-- MUTE BOX — separate, bottom-center -->
     <div class="muteBx" id="muteBxL">
@@ -481,6 +559,9 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
         <div class="wBtn amber" onclick="gAdj(-1)">&#9664;</div>
         <div class="wVal amber" id="gValR">0px</div>
         <div class="wBtn amber" onclick="gAdj(1)">&#9654;</div>
+      </div>
+      <div class="netCtrlRow" id="netCtrlR">
+        <button class="netCtrlBtn dismiss" id="netCtrlBtnR" onclick="netCtrlAction()">DISMISS NTWK</button>
       </div>
     </div>
     <div class="topC">
@@ -527,10 +608,18 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
       <div class="elvv" id="evR">--M</div>
       <div class="elvl">ASL</div>
     </div>
-    <!-- VOIP INFO BOX — separate, bottom-left -->
-    <div class="voipBox" id="voipBoxR">
+    <!-- VOIP INFO BOX — clickable to show member list -->
+    <div class="voipBox" id="voipBoxR" onclick="toggleMemberList('R')">
       <div class="vbOp" id="vbOpR">OP: ---</div>
-      <div class="vbMb" id="vbMbR">1/50</div>
+      <div class="vbMb" id="vbMbR">1/100</div>
+    </div>
+    <!-- MEMBER LIST POPUP — right eye -->
+    <div class="memberList" id="memberListR">
+      <div class="mlHead">
+        <span>MEMBERS</span>
+        <button class="mlBack" onclick="toggleMemberList('R')">&#10005;</button>
+      </div>
+      <div class="mlScroll" id="mlScrollR"></div>
     </div>
     <!-- MUTE BOX — separate, bottom-center -->
     <div class="muteBx" id="muteBxR">
@@ -708,67 +797,59 @@ async function initNetwork(){
     ? roomId + '-HOST'
     : roomId + '-' + Math.random().toString(36).substr(2,6).toUpperCase();
 
+  creatorId = roomId + '-HOST'; // always known
+
+  // Creator is first in member order
+  if(isCreator){
+    memberOrder = [myPeerId];
+  }
+
   peer = new Peer(myPeerId, { debug:0 });
 
   peer.on('open', function(){
     updateVoipBar();
-    // Listen for incoming calls and data connections from any peer
     peer.on('call', handleIncomingCall);
     peer.on('connection', handleDataConn);
-    // Joiners connect to host to get peer list, then mesh out
     if (!isCreator) {
-      connectToPeer(roomId + '-HOST');
+      connectToPeer(creatorId);
     }
+    // Start auto-logout and cleanup timers
+    resetAutoLogout();
+    startHourlyCleanup();
   });
 
   peer.on('error', function(err){
     console.warn('PeerJS error:', err.type, err);
-    // Retry connection on peer-unavailable (host not yet up)
     if (err.type === 'peer-unavailable') {
-      setTimeout(function(){ if(!isCreator) connectToPeer(roomId+'-HOST'); }, 3000);
+      setTimeout(function(){ if(!isCreator && peer) connectToPeer(creatorId); }, 3000);
     }
   });
 }
 
-// Connect to a specific peer: exchange nicks + start audio call
 function connectToPeer(targetId){
-  if (peers[targetId] || targetId === peer.id) return; // already connected
+  if (peers[targetId] || targetId === peer.id) return;
 
-  // DATA channel — for nick/member list exchange (encrypted)
   var conn = peer.connect(targetId, { reliable:true });
   peers[targetId] = peers[targetId] || {};
   peers[targetId].conn = conn;
 
   conn.on('open', async function(){
-    // Send our nick
     conn.send(await encryptMsg({ type:'hello', nick:myNick, peerId:peer.id }));
-  });
-  conn.on('data', async function(raw){
-    var msg = await decryptMsg(raw);
-    if (!msg) return;
-    if (msg.type === 'hello') {
-      memberNicks[targetId] = msg.nick;
-      memberCount = Object.keys(memberNicks).length + 1;
-      updateVoipBar();
-    }
-    if (msg.type === 'peerList') {
-      // Host sends us the list of all active peers — connect to each
-      msg.peers.forEach(function(pid){
-        if (pid !== peer.id) connectToPeer(pid);
-      });
+    // Add self to order when connecting to host
+    if(targetId === creatorId && memberOrder.indexOf(peer.id)===-1){
+      memberOrder.push(peer.id);
     }
   });
-  conn.on('close',  function(){ removePeer(targetId); });
-  conn.on('error',  function(e){ console.warn('conn error', e); });
+  conn.on('data',  function(raw){ handleControlMsg(raw, targetId); });
+  conn.on('close', function(){ removePeer(targetId); });
+  conn.on('error', function(e){ console.warn('conn error', e); });
 
-  // AUDIO call — send our mic stream, receive their stream
   if (micStream) {
     var call = peer.call(targetId, micStream, { metadata:{ nick:myNick } });
     peers[targetId].call = call;
     call.on('stream', function(remoteStream){
-      var nick = memberNicks[targetId] || call.metadata && call.metadata.nick || 'SOLDIER';
+      var nick = memberNicks[targetId] || (call.metadata && call.metadata.nick) || 'SOLDIER';
       memberNicks[targetId] = nick;
-      // ── FIX: route audio to SPEAKERS so ALL voices are heard ──
       addRemoteAudio(targetId, remoteStream, nick);
       updateVoipBar();
     });
@@ -777,65 +858,45 @@ function connectToPeer(targetId){
   }
 }
 
-// Handle calls initiated by remote peers to us
 function handleIncomingCall(call){
   var pid = call.peer;
   if (Object.keys(peers).length >= MAX_MEMBERS - 1) { call.close(); return; }
-
-  // Answer with our mic stream
   call.answer(micStream || new MediaStream());
   peers[pid] = peers[pid] || {};
   peers[pid].call = call;
-
   call.on('stream', function(remoteStream){
     var nick = memberNicks[pid] || (call.metadata && call.metadata.nick) || 'SOLDIER';
     memberNicks[pid] = nick;
-    // ── FIX: route audio to SPEAKERS so ALL voices are heard ──
     addRemoteAudio(pid, remoteStream, nick);
     memberCount = Object.keys(memberNicks).length + 1;
     updateVoipBar();
-    // If we are host, broadcast updated peer list to all
     if (isCreator) broadcastPeerList();
   });
   call.on('close', function(){ removePeer(pid); });
   call.on('error', function(e){ console.warn('incoming call error', e); });
 }
 
-// Handle incoming data connections
 function handleDataConn(conn){
   var pid = conn.peer;
   peers[pid] = peers[pid] || {};
   peers[pid].conn = conn;
-
   conn.on('open', async function(){
-    // Reply with our nick
     conn.send(await encryptMsg({ type:'hello', nick:myNick, peerId:peer.id }));
-    // If host, send full peer list so new member can mesh out
     if (isCreator) {
       conn.send(await encryptMsg({ type:'peerList', peers: Object.keys(peers) }));
+      // Add joiner to member order
+      addToOrder(pid, memberNicks[pid]||'?');
     }
   });
-  conn.on('data', async function(raw){
-    var msg = await decryptMsg(raw);
-    if (!msg) return;
-    if (msg.type === 'hello') {
-      memberNicks[pid] = msg.nick;
-      memberCount = Object.keys(memberNicks).length + 1;
-      updateVoipBar();
-      if (isCreator) broadcastPeerList();
-    }
-  });
+  conn.on('data',  function(raw){ handleControlMsg(raw, pid); });
   conn.on('close', function(){ removePeer(pid); });
 }
 
-// Host broadcasts current peer list so all joiners can form full mesh
 async function broadcastPeerList(){
   var list = Object.keys(peers);
   var msg  = await encryptMsg({ type:'peerList', peers: list });
   Object.values(peers).forEach(function(p){
-    if (p.conn && p.conn.open) {
-      try { p.conn.send(msg); } catch(e){}
-    }
+    if (p.conn && p.conn.open){ try{ p.conn.send(msg); }catch(e){} }
   });
 }
 
@@ -943,6 +1004,249 @@ function removePeer(pid){
 // ══════════════════════════════════════════════════════════
 // MUTE TOGGLE
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+// MEMBER ORDER — track join order for sorted list
+// ══════════════════════════════════════════════════════════
+var memberOrder = []; // array of peerIds in join order, creator first
+var creatorId   = ''; // peerId of network creator
+
+// ══════════════════════════════════════════════════════════
+// VOIP BAR UPDATE
+// ══════════════════════════════════════════════════════════
+function updateVoipBar(){
+  memberCount = Object.keys(memberNicks).length + 1;
+  ['L','R'].forEach(function(eye){
+    var box = document.getElementById('voipBox'+eye);
+    var mbx = document.getElementById('muteBx'+eye);
+    if(box){ box.style.display='block'; }
+    if(mbx){ mbx.style.display='block'; }
+    var opEl = document.getElementById('vbOp'+eye);
+    var mbEl = document.getElementById('vbMb'+eye);
+    if(opEl){ opEl.textContent = 'OP: '+myRoom; }
+    if(mbEl){ mbEl.textContent = myNick+' | '+memberCount+'/'+MAX_MEMBERS; }
+    // Show dismiss/logout button
+    var row = document.getElementById('netCtrl'+eye);
+    var btn = document.getElementById('netCtrlBtn'+eye);
+    if(row){ row.style.display='block'; }
+    if(btn){
+      if(isCreator){
+        btn.textContent = 'DISMISS NTWK';
+        btn.className   = 'netCtrlBtn dismiss';
+      } else {
+        btn.textContent = 'LOGOUT';
+        btn.className   = 'netCtrlBtn logout';
+      }
+    }
+  });
+  renderMemberList();
+}
+
+// ══════════════════════════════════════════════════════════
+// MEMBER LIST — tap voipBox to toggle, sorted by join order
+// ══════════════════════════════════════════════════════════
+function toggleMemberList(eye){
+  var ml = document.getElementById('memberList'+eye);
+  if(!ml) return;
+  var isOpen = ml.style.display === 'block';
+  // Close all lists first
+  ['L','R'].forEach(function(e){
+    var el = document.getElementById('memberList'+e);
+    if(el) el.style.display='none';
+  });
+  if(!isOpen){ ml.style.display='block'; renderMemberList(); }
+}
+
+function renderMemberList(){
+  var items = buildMemberItems();
+  ['L','R'].forEach(function(eye){
+    var scr = document.getElementById('mlScroll'+eye);
+    if(!scr) return;
+    scr.innerHTML = items;
+  });
+}
+
+function buildMemberItems(){
+  var html = '';
+  // Creator always first
+  var creatorNick = isCreator ? myNick : (memberNicks[creatorId] || '---');
+  html += '<div class="mlItem creator'+(isCreator?' me':'')+'">'+escHtml(creatorNick)+'</div>';
+  // Then others in join order
+  memberOrder.forEach(function(pid){
+    if(pid === creatorId) return; // already shown
+    var nick = memberNicks[pid];
+    if(!nick) return;
+    var cls = 'mlItem'+(pid===peer.id?' me':'');
+    html += '<div class="'+cls+'">'+escHtml(nick)+'</div>';
+  });
+  // Self if joiner and not yet in list
+  if(!isCreator){
+    var selfInList = memberOrder.some(function(pid){ return pid===peer.id; });
+    if(!selfInList){
+      html = html.replace('</div>', '</div>'); // self added by join flow
+    }
+  }
+  return html || '<div class="mlItem" style="color:rgba(0,255,136,0.3)">NO MEMBERS</div>';
+}
+
+function escHtml(s){ return String(s).replace(/[&<>"]/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]);}); }
+
+// Add to member order when a peer connects
+function addToOrder(pid, nick){
+  if(memberOrder.indexOf(pid)===-1){ memberOrder.push(pid); }
+  memberNicks[pid]=nick;
+  renderMemberList();
+}
+
+// ══════════════════════════════════════════════════════════
+// DISMISS NETWORK / LOGOUT
+// ══════════════════════════════════════════════════════════
+function netCtrlAction(){
+  if(isCreator){
+    if(!confirm('Dismiss network? All members will be disconnected.')) return;
+    dismissNetwork();
+  } else {
+    logoutMember();
+  }
+}
+
+function dismissNetwork(){
+  // Broadcast dismiss signal to all peers
+  broadcastEncrypted({ type:'networkDismissed' });
+  setTimeout(function(){
+    shutdownNetwork();
+    goToSplash();
+  }, 500);
+}
+
+function logoutMember(){
+  broadcastEncrypted({ type:'peerLeft', nick:myNick });
+  shutdownNetwork();
+  goToSplash();
+}
+
+async function broadcastEncrypted(obj){
+  var msg = await encryptMsg(obj);
+  Object.values(peers).forEach(function(p){
+    if(p.conn && p.conn.open){
+      try{ p.conn.send(msg); }catch(e){}
+    }
+  });
+}
+
+function shutdownNetwork(){
+  // Disconnect all peers
+  Object.values(peers).forEach(function(p){
+    if(p.call)  try{p.call.close();}catch(e){}
+    if(p.conn)  try{p.conn.close();}catch(e){}
+    if(p.audio){ p.audio.pause(); p.audio.srcObject=null; try{document.body.removeChild(p.audio);}catch(e){} }
+  });
+  if(peer){ try{peer.destroy();}catch(e){} peer=null; }
+  peers={};
+  memberNicks={};
+  memberOrder=[];
+  memberCount=1;
+  clearTimeout(autoLogoutTimer);
+  clearInterval(hourlyCleanupTimer);
+}
+
+function goToSplash(){
+  // Hide HUD, show main splash
+  document.getElementById('vr').style.display='none';
+  document.getElementById('vrBtn').style.display='none';
+  document.getElementById('fsBtn').style.display='none';
+  // Hide voip elements
+  ['L','R'].forEach(function(eye){
+    var b=document.getElementById('voipBox'+eye); if(b) b.style.display='none';
+    var m=document.getElementById('muteBx'+eye);  if(m) m.style.display='none';
+    var n=document.getElementById('netCtrl'+eye); if(n) n.style.display='none';
+    var l=document.getElementById('memberList'+eye); if(l) l.style.display='none';
+  });
+  showScreen('scrMain');
+  // Reset form fields
+  ['cOpName','cPass','cNick','jOpName','jPass','jNick'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+  ['cErr','jErr'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.textContent='';
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// AUTO-LOGOUT — after 1 hour of inactivity in HUD
+// ══════════════════════════════════════════════════════════
+var autoLogoutTimer = null;
+var AUTO_LOGOUT_MS  = 60 * 60 * 1000; // 1 hour
+
+function resetAutoLogout(){
+  clearTimeout(autoLogoutTimer);
+  autoLogoutTimer = setTimeout(function(){
+    logoutMember();
+    alert('Auto-logged out after 1 hour of inactivity.');
+  }, AUTO_LOGOUT_MS);
+}
+
+// Reset timer on any touch/click inside HUD
+document.addEventListener('touchstart', function(){ if(peer) resetAutoLogout(); });
+document.addEventListener('click',      function(){ if(peer) resetAutoLogout(); });
+
+// ══════════════════════════════════════════════════════════
+// HOURLY CLEANUP — check every hour (runs client-side)
+// Shuts down empty/abandoned networks on this client
+// Note: true server-side cleanup requires a backend;
+// this client-side version cleans up the local peer
+// connection if it detects no other members for >10 min
+// ══════════════════════════════════════════════════════════
+var hourlyCleanupTimer = null;
+var emptyNetworkStart  = null;
+
+function startHourlyCleanup(){
+  // Check every 10 minutes if network is empty
+  hourlyCleanupTimer = setInterval(function(){
+    if(!peer) return;
+    var activePeers = Object.keys(peers).length;
+    if(activePeers === 0 && !isCreator){
+      // No one in network — auto logout
+      logoutMember();
+      return;
+    }
+    if(activePeers === 0 && isCreator){
+      // Creator alone for >10min — dismiss
+      if(!emptyNetworkStart){ emptyNetworkStart = Date.now(); }
+      else if(Date.now() - emptyNetworkStart > 10*60*1000){
+        dismissNetwork();
+      }
+    } else {
+      emptyNetworkStart = null;
+    }
+  }, 10 * 60 * 1000); // every 10 minutes
+}
+
+// ══════════════════════════════════════════════════════════
+// Handle incoming network control messages
+// ══════════════════════════════════════════════════════════
+async function handleControlMsg(raw, pid){
+  var msg = await decryptMsg(raw);
+  if(!msg) return;
+
+  if(msg.type === 'hello'){
+    addToOrder(pid, msg.nick);
+    memberCount = Object.keys(memberNicks).length + 1;
+    updateVoipBar();
+    if(isCreator) broadcastPeerList();
+  }
+  if(msg.type === 'peerList'){
+    msg.peers.forEach(function(p){ if(p !== peer.id) connectToPeer(p); });
+  }
+  if(msg.type === 'networkDismissed'){
+    alert('Network dismissed by initiator.');
+    shutdownNetwork();
+    goToSplash();
+  }
+  if(msg.type === 'peerLeft'){
+    removePeer(pid);
+  }
+}
+
 function toggleMute(){
   isMuted = !isMuted;
   if(micStream){ micStream.getAudioTracks().forEach(function(t){ t.enabled=!isMuted; }); }
@@ -953,22 +1257,6 @@ function toggleMute(){
     btn.innerHTML = txt;
     if(isMuted){ btn.classList.add('muted'); }
     else       { btn.classList.remove('muted'); }
-  });
-}
-
-function updateVoipBar(){
-  ['L','R'].forEach(function(eye){
-    // Show info box
-    var box = document.getElementById('voipBox'+eye);
-    if(box){ box.style.display='block'; }
-    // Show mute box
-    var mbx = document.getElementById('muteBx'+eye);
-    if(mbx){ mbx.style.display='block'; }
-    // Update text
-    var opEl = document.getElementById('vbOp'+eye);
-    var mbEl = document.getElementById('vbMb'+eye);
-    if(opEl){ opEl.textContent = 'OP: '+myRoom; }
-    if(mbEl){ mbEl.textContent = myNick+' | '+memberCount+'/'+MAX_MEMBERS; }
   });
 }
 
