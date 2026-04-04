@@ -557,7 +557,6 @@ var memberNicks={};             // peerId → nickname
 var memberCount=1;
 var audioCtx=null;
 var activeSpeaker='', speakerTimer=null;
-var MAX_MEMBERS=50;
 
 // ══════════════════════════════════════════════════════════
 // SCREEN NAVIGATION
@@ -643,13 +642,11 @@ async function requestPerms(){
 }
 
 // ══════════════════════════════════════════════════════════
-// PEERJS NETWORK — WebRTC mesh audio, max 50 peers
-// Uses PeerJS free cloud signaling server
-// Room auth: room ID = SHA-like hash of (opname+password)
-// So only people with matching name+pass can connect
+// PEERJS NETWORK — WebRTC full-mesh audio, max 100 peers
 // ══════════════════════════════════════════════════════════
+var MAX_MEMBERS = 100; // updated capacity
+
 function roomHash(op, pass){
-  // Simple deterministic room ID from op name + password
   var s = op+'::'+pass;
   var h = 0;
   for(var i=0;i<s.length;i++){ h = ((h<<5)-h)+s.charCodeAt(i); h|=0; }
@@ -657,183 +654,267 @@ function roomHash(op, pass){
 }
 
 // ══════════════════════════════════════════════════════════
-// END-TO-END ENCRYPTION — AES-GCM via WebCrypto API
-// Key is derived from the operation password using PBKDF2
-// All data channel messages are encrypted before sending
-// Audio streams are encrypted natively by WebRTC DTLS-SRTP
+// END-TO-END ENCRYPTION — AES-256-GCM via WebCrypto API
+// Key derived from password+opname using PBKDF2 (100k iter)
+// Audio encrypted natively by WebRTC DTLS-SRTP
+// Data messages encrypted with AES-GCM before sending
 // ══════════════════════════════════════════════════════════
-var e2eKey = null; // CryptoKey derived from password
+var e2eKey = null;
 
 async function deriveKey(password, salt) {
-  var enc  = new TextEncoder();
-  var keyMaterial = await crypto.subtle.importKey(
-    'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
-  );
+  var enc = new TextEncoder();
+  var km  = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     { name:'PBKDF2', salt:enc.encode(salt), iterations:100000, hash:'SHA-256' },
-    keyMaterial,
+    km,
     { name:'AES-GCM', length:256 },
-    false,
-    ['encrypt','decrypt']
+    false, ['encrypt','decrypt']
   );
 }
 
 async function encryptMsg(obj) {
   if (!e2eKey) return JSON.stringify(obj);
   var iv  = crypto.getRandomValues(new Uint8Array(12));
-  var enc = new TextEncoder();
-  var ct  = await crypto.subtle.encrypt({name:'AES-GCM',iv:iv}, e2eKey, enc.encode(JSON.stringify(obj)));
-  // Pack iv + ciphertext as base64
-  var combined = new Uint8Array(iv.length + ct.byteLength);
-  combined.set(iv); combined.set(new Uint8Array(ct), iv.length);
-  return btoa(String.fromCharCode.apply(null, combined));
+  var ct  = await crypto.subtle.encrypt({name:'AES-GCM',iv:iv}, e2eKey,
+              new TextEncoder().encode(JSON.stringify(obj)));
+  var out = new Uint8Array(12 + ct.byteLength);
+  out.set(iv); out.set(new Uint8Array(ct), 12);
+  return btoa(String.fromCharCode.apply(null, out));
 }
 
 async function decryptMsg(data) {
   if (!e2eKey) { try{return JSON.parse(data);}catch(e){return null;} }
   try {
-    var bytes    = Uint8Array.from(atob(data), function(c){return c.charCodeAt(0);});
-    var iv       = bytes.slice(0,12);
-    var ct       = bytes.slice(12);
-    var pt       = await crypto.subtle.decrypt({name:'AES-GCM',iv:iv}, e2eKey, ct);
+    var bytes = Uint8Array.from(atob(data), function(c){return c.charCodeAt(0);});
+    var pt    = await crypto.subtle.decrypt(
+                  {name:'AES-GCM', iv:bytes.slice(0,12)}, e2eKey, bytes.slice(12));
     return JSON.parse(new TextDecoder().decode(pt));
-  } catch(e) { return null; }
+  } catch(e){ return null; }
 }
 
+// ══════════════════════════════════════════════════════════
+// NETWORK INIT
+// Architecture: full mesh — every peer connects to every
+// other peer directly so ALL voices are heard by ALL members
+// Host peer acts as directory/registry only
+// ══════════════════════════════════════════════════════════
 async function initNetwork(){
   if(!window.Peer){ console.warn('PeerJS not loaded'); return; }
 
-  // Derive AES-GCM key from password — same key for all members of same room
   e2eKey = await deriveKey(myPass, myRoom);
 
-  var roomId = roomHash(myRoom, myPass);
-  // Each peer ID = roomId + random suffix for uniqueness
-  var myPeerId = roomId+'-'+Math.random().toString(36).substr(2,6).toUpperCase();
+  var roomId   = roomHash(myRoom, myPass);
+  var myPeerId = isCreator
+    ? roomId + '-HOST'
+    : roomId + '-' + Math.random().toString(36).substr(2,6).toUpperCase();
 
   peer = new Peer(myPeerId, { debug:0 });
 
-  peer.on('open', function(id){
+  peer.on('open', function(){
     updateVoipBar();
-    // Broadcast presence to room by connecting to known room host peer
-    // Creator's peer ID = roomId + '-HOST'
-    if(isCreator){
-      var hostId = roomId+'-HOST';
-      // Re-register as host
-      peer.destroy();
-      peer = new Peer(hostId, { debug:0 });
-      peer.on('open', function(){ updateVoipBar(); });
-      peer.on('call', handleIncomingCall);
-      peer.on('connection', handleDataConn);
-    } else {
-      // Joiner connects to host
-      connectToHost(roomId+'-HOST');
-      peer.on('call', handleIncomingCall);
-      peer.on('connection', handleDataConn);
+    // Listen for incoming calls and data connections from any peer
+    peer.on('call', handleIncomingCall);
+    peer.on('connection', handleDataConn);
+    // Joiners connect to host to get peer list, then mesh out
+    if (!isCreator) {
+      connectToPeer(roomId + '-HOST');
     }
   });
 
-  peer.on('error', function(e){ console.warn('Peer error:',e); });
+  peer.on('error', function(err){
+    console.warn('PeerJS error:', err.type, err);
+    // Retry connection on peer-unavailable (host not yet up)
+    if (err.type === 'peer-unavailable') {
+      setTimeout(function(){ if(!isCreator) connectToPeer(roomId+'-HOST'); }, 3000);
+    }
+  });
 }
 
-function connectToHost(hostId){
-  // Data connection to exchange nicknames
-  var conn = peer.connect(hostId, { metadata:{ nick:myNick, room:myRoom } });
-  conn.on('open', async function(){
-    conn.send(await encryptMsg({ type:'nick', nick:myNick }));
-    memberNicks[hostId] = 'HOST';
-  });
-  conn.on('data', async function(d){
-    var msg = await decryptMsg(d);
-    if(!msg) return;
-    if(msg.type==='nick') memberNicks[hostId]=msg.nick;
-    if(msg.type==='memberList'){ memberNicks=msg.list; memberCount=Object.keys(msg.list).length+1; updateVoipBar(); }
-  });
+// Connect to a specific peer: exchange nicks + start audio call
+function connectToPeer(targetId){
+  if (peers[targetId] || targetId === peer.id) return; // already connected
 
-  // Audio call to host
-  if(micStream){
-    var call = peer.call(hostId, micStream, { metadata:{ nick:myNick } });
-    call.on('stream', function(s){ addRemoteAudio(hostId, s, d&&d.nick||'UNKNOWN'); });
-    peers[hostId]={ call:call };
+  // DATA channel — for nick/member list exchange (encrypted)
+  var conn = peer.connect(targetId, { reliable:true });
+  peers[targetId] = peers[targetId] || {};
+  peers[targetId].conn = conn;
+
+  conn.on('open', async function(){
+    // Send our nick
+    conn.send(await encryptMsg({ type:'hello', nick:myNick, peerId:peer.id }));
+  });
+  conn.on('data', async function(raw){
+    var msg = await decryptMsg(raw);
+    if (!msg) return;
+    if (msg.type === 'hello') {
+      memberNicks[targetId] = msg.nick;
+      memberCount = Object.keys(memberNicks).length + 1;
+      updateVoipBar();
+    }
+    if (msg.type === 'peerList') {
+      // Host sends us the list of all active peers — connect to each
+      msg.peers.forEach(function(pid){
+        if (pid !== peer.id) connectToPeer(pid);
+      });
+    }
+  });
+  conn.on('close',  function(){ removePeer(targetId); });
+  conn.on('error',  function(e){ console.warn('conn error', e); });
+
+  // AUDIO call — send our mic stream, receive their stream
+  if (micStream) {
+    var call = peer.call(targetId, micStream, { metadata:{ nick:myNick } });
+    peers[targetId].call = call;
+    call.on('stream', function(remoteStream){
+      var nick = memberNicks[targetId] || call.metadata && call.metadata.nick || 'SOLDIER';
+      memberNicks[targetId] = nick;
+      // ── FIX: route audio to SPEAKERS so ALL voices are heard ──
+      addRemoteAudio(targetId, remoteStream, nick);
+      updateVoipBar();
+    });
+    call.on('close', function(){ removePeer(targetId); });
+    call.on('error', function(e){ console.warn('call error', e); });
   }
 }
 
+// Handle calls initiated by remote peers to us
 function handleIncomingCall(call){
-  if(Object.keys(peers).length >= MAX_MEMBERS-1) { call.close(); return; }
-  call.answer(micStream||new MediaStream());
   var pid = call.peer;
-  call.on('stream', function(s){
-    var nick = memberNicks[pid] || call.metadata&&call.metadata.nick || 'SOLDIER';
-    memberNicks[pid]=nick;
-    memberCount=Object.keys(peers).length+2;
-    addRemoteAudio(pid, s, nick);
+  if (Object.keys(peers).length >= MAX_MEMBERS - 1) { call.close(); return; }
+
+  // Answer with our mic stream
+  call.answer(micStream || new MediaStream());
+  peers[pid] = peers[pid] || {};
+  peers[pid].call = call;
+
+  call.on('stream', function(remoteStream){
+    var nick = memberNicks[pid] || (call.metadata && call.metadata.nick) || 'SOLDIER';
+    memberNicks[pid] = nick;
+    // ── FIX: route audio to SPEAKERS so ALL voices are heard ──
+    addRemoteAudio(pid, remoteStream, nick);
+    memberCount = Object.keys(memberNicks).length + 1;
     updateVoipBar();
-    // Broadcast updated member list to all
-    broadcastMemberList();
+    // If we are host, broadcast updated peer list to all
+    if (isCreator) broadcastPeerList();
   });
   call.on('close', function(){ removePeer(pid); });
-  peers[pid]={ call:call };
+  call.on('error', function(e){ console.warn('incoming call error', e); });
 }
 
+// Handle incoming data connections
 function handleDataConn(conn){
-  var pid=conn.peer;
-  conn.on('data', async function(d){
-    var msg = await decryptMsg(d);
-    if(!msg) return;
-    if(msg.type==='nick'){ memberNicks[pid]=msg.nick; updateVoipBar(); }
-  });
+  var pid = conn.peer;
+  peers[pid] = peers[pid] || {};
+  peers[pid].conn = conn;
+
   conn.on('open', async function(){
-    conn.send(await encryptMsg({type:'nick', nick:myNick}));
-    conn.send(await encryptMsg({type:'memberList', list:memberNicks}));
+    // Reply with our nick
+    conn.send(await encryptMsg({ type:'hello', nick:myNick, peerId:peer.id }));
+    // If host, send full peer list so new member can mesh out
+    if (isCreator) {
+      conn.send(await encryptMsg({ type:'peerList', peers: Object.keys(peers) }));
+    }
   });
+  conn.on('data', async function(raw){
+    var msg = await decryptMsg(raw);
+    if (!msg) return;
+    if (msg.type === 'hello') {
+      memberNicks[pid] = msg.nick;
+      memberCount = Object.keys(memberNicks).length + 1;
+      updateVoipBar();
+      if (isCreator) broadcastPeerList();
+    }
+  });
+  conn.on('close', function(){ removePeer(pid); });
 }
 
-function broadcastMemberList(){
+// Host broadcasts current peer list so all joiners can form full mesh
+async function broadcastPeerList(){
+  var list = Object.keys(peers);
+  var msg  = await encryptMsg({ type:'peerList', peers: list });
   Object.values(peers).forEach(function(p){
-    if(p.conn) p.conn.send({type:'memberList', list:memberNicks});
+    if (p.conn && p.conn.open) {
+      try { p.conn.send(msg); } catch(e){}
+    }
   });
 }
 
 // ══════════════════════════════════════════════════════════
-// AUDIO — add remote peer audio + active speaker detection
+// AUDIO — play ALL remote streams through speakers
+// Analyser measures volume for speaker detection ONLY
+// Volume detection NEVER mutes or suppresses any stream
 // ══════════════════════════════════════════════════════════
 function addRemoteAudio(pid, remoteStream, nick){
-  if(!audioCtx){ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
-  var audio = new Audio();
+  // Resume AudioContext if suspended (browser autoplay policy)
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(function(){});
+  }
+
+  // Remove old audio element for this peer if reconnecting
+  if (peers[pid] && peers[pid].audio) {
+    peers[pid].audio.pause();
+    peers[pid].audio.srcObject = null;
+  }
+
+  // ── Create Audio element and route to speakers ──
+  var audio       = new Audio();
   audio.srcObject = remoteStream;
-  audio.autoplay = true;
-  audio.play().catch(function(){});
-  // Analyser for volume detection
-  var src = audioCtx.createMediaStreamSource(remoteStream);
+  audio.autoplay  = true;
+  audio.volume    = 1.0;
+  // Append to DOM so iOS/Android doesn't garbage collect it
+  audio.style.display = 'none';
+  document.body.appendChild(audio);
+  audio.play().catch(function(e){ console.warn('audio play blocked:', e); });
+
+  // ── Analyser for DISPLAY ONLY — does NOT affect audio output ──
+  var src      = audioCtx.createMediaStreamSource(remoteStream);
   var analyser = audioCtx.createAnalyser();
-  analyser.fftSize=256;
+  analyser.fftSize       = 256;
+  analyser.smoothingTimeConstant = 0.4;
   src.connect(analyser);
-  peers[pid] = peers[pid]||{};
-  peers[pid].analyser=analyser;
-  peers[pid].nick=nick;
-  peers[pid].audio=audio;
+  // NOTE: we do NOT connect analyser to destination
+  // The Audio() element already handles output independently
+  // Connecting src → destination here would cause echo/doubling
+
+  peers[pid]          = peers[pid] || {};
+  peers[pid].analyser = analyser;
+  peers[pid].nick     = nick;
+  peers[pid].audio    = audio;
+
   startVolumeMonitor();
 }
 
-var volumeMonitorRunning=false;
+// ── Volume monitor — DISPLAY ONLY, never suppresses any voice ──
+var volumeMonitorRunning = false;
 function startVolumeMonitor(){
-  if(volumeMonitorRunning) return;
-  volumeMonitorRunning=true;
-  var buf=new Uint8Array(64);
+  if (volumeMonitorRunning) return;
+  volumeMonitorRunning = true;
+  var buf = new Uint8Array(64);
+
   function tick(){
-    var loudest='', maxDb=20; // threshold dB
+    var loudest = '', maxRms = 15; // min threshold to avoid noise triggering
+
     Object.keys(peers).forEach(function(pid){
-      var p=peers[pid];
-      if(!p.analyser) return;
+      var p = peers[pid];
+      if (!p || !p.analyser) return;
       p.analyser.getByteFrequencyData(buf);
-      var sum=0; for(var i=0;i<buf.length;i++) sum+=buf[i];
-      var rms=sum/buf.length;
-      if(rms>maxDb){ maxDb=rms; loudest=p.nick||pid; }
+      var sum = 0;
+      for (var i = 0; i < buf.length; i++) sum += buf[i];
+      var rms = sum / buf.length;
+      if (rms > maxRms) { maxRms = rms; loudest = p.nick || pid; }
     });
-    if(loudest && loudest!==activeSpeaker){
-      activeSpeaker=loudest;
+
+    // Update displayed speaker name
+    if (loudest && loudest !== activeSpeaker) {
+      activeSpeaker = loudest;
       setSpeaker(loudest);
       clearTimeout(speakerTimer);
-      speakerTimer=setTimeout(function(){ activeSpeaker=''; setSpeaker(''); },2500);
+      speakerTimer = setTimeout(function(){
+        activeSpeaker = ''; setSpeaker('');
+      }, 2000);
     }
     requestAnimationFrame(tick);
   }
