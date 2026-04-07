@@ -141,12 +141,13 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
 .memberList .mlItem.me{color:var(--a);}
 .memberList .mlItem.creator::after{content:' ★';color:var(--a);font-size:7px;}
 
-/* MUTE button — per-eye, bottom-right, above lat/lon box */
+/* MUTE + TORCH stack — per-eye, bottom-right */
 .muteBx{
   position:absolute;
   bottom:80px;right:14px;
   z-index:41;
   display:none;
+  flex-direction:column;gap:4px;align-items:flex-end;
 }
 .muteBx button{
   font-family:'Orbitron',sans-serif;font-size:7px;font-weight:700;
@@ -161,6 +162,20 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
   border-color:rgba(255,50,50,0.5);
   background:rgba(255,50,50,0.1);
   color:var(--r);
+}
+/* Flashlight button */
+#torchBtnL,#torchBtnR{
+  font-size:16px;padding:4px 12px;
+  border:1px solid rgba(255,255,100,0.4);
+  background:rgba(255,255,100,0.06);
+  cursor:pointer;touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+  letter-spacing:0;
+}
+#torchBtnL.on,#torchBtnR.on{
+  background:rgba(255,255,100,0.25);
+  border-color:rgba(255,255,100,0.8);
+  box-shadow:0 0 12px rgba(255,255,100,0.4);
 }
 
 /* DISMISS / LOGOUT button — below gap adjuster, top-left */
@@ -535,6 +550,7 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
     </div>
     <!-- MUTE BOX — separate, bottom-center -->
     <div class="muteBx" id="muteBxL">
+      <button id="torchBtnL" onclick="toggleTorch()">&#128294;</button>
       <button id="muteBtnL" onclick="toggleMute()">&#127908; LIVE</button>
     </div>
   </div>
@@ -623,6 +639,7 @@ html,body{width:100%;height:100dvh;overflow:hidden;background:#000;font-family:'
     </div>
     <!-- MUTE BOX — separate, bottom-center -->
     <div class="muteBx" id="muteBxR">
+      <button id="torchBtnR" onclick="toggleTorch()">&#128294;</button>
       <button id="muteBtnR" onclick="toggleMute()">&#127908; LIVE</button>
     </div>
   </div>
@@ -1019,7 +1036,7 @@ function updateVoipBar(){
     var box = document.getElementById('voipBox'+eye);
     var mbx = document.getElementById('muteBx'+eye);
     if(box){ box.style.display='block'; }
-    if(mbx){ mbx.style.display='block'; }
+    if(mbx){ mbx.style.display='flex'; }
     var opEl = document.getElementById('vbOp'+eye);
     var mbEl = document.getElementById('vbMb'+eye);
     if(opEl){ opEl.textContent = 'OP: '+myRoom; }
@@ -1765,6 +1782,27 @@ function gAdj(d) {
   var eR = document.getElementById('gValR');
   if (eL) eL.textContent = label;
   if (eR) eR.textContent = label;
+}
+
+// ── FLASHLIGHT (torch) ──
+var torchOn = false;
+function toggleTorch(){
+  torchOn = !torchOn;
+  // Apply to camera stream track using torch constraint
+  if(stream){
+    var track = stream.getVideoTracks()[0];
+    if(track && track.applyConstraints){
+      track.applyConstraints({ advanced:[{ torch: torchOn }] })
+        .catch(function(){ torchOn = !torchOn; }); // revert if unsupported
+    }
+  }
+  // Update both buttons
+  ['L','R'].forEach(function(s){
+    var btn = document.getElementById('torchBtn'+s);
+    if(!btn) return;
+    if(torchOn){ btn.classList.add('on'); }
+    else       { btn.classList.remove('on'); }
+  });
 }
 
 // ── MGRS approx ──
